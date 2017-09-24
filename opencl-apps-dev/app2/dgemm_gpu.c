@@ -14,12 +14,12 @@ const char *kernelSource =                                       "\n" \
 "{                                                                \n" \
 "    //Get our global thread ID                                   \n" \
 "    int id = get_global_id(0);                                   \n" \
-"    int k = 0;							  \n" \
 "                      						  \n" \
 "    //int rows = n/cols;                                         \n" \
 "    //Make sure we do not go out of bounds                       \n" \
 "    if (id < n)                                                  \n" \
 "    {								  \n" \
+"      int k = 0;						  \n" \
 "      int x = cols*(id/cols);					  \n" \
 "      int y = id%cols;						  \n" \
 "      for(k = 0; k < cols/*rows*/; k++)			  \n" \

@@ -5,26 +5,32 @@
  
 // OpenCL kernel. Each work item takes care of one element of c
 const char *kernelSource =                                       "\n" \
-"__kernel void gemm(  __global float *a,                         \n" \
-"                       __global float *b,                       \n" \
-"                       __global float *c,                       \n" \
+"#pragma OPENCL EXTENSION cl_khr_fp64 : enable                    \n" \
+"__kernel void gemm(  __global double *a,                         \n" \
+"                       __global double *b,                       \n" \
+"                       __global double *c,                       \n" \
 "                       const unsigned int n,			  \n" \
 "			const unsigned int cols)                  \n" \
 "{                                                                \n" \
 "    //Get our global thread ID                                   \n" \
 "    int id = get_global_id(0);                                   \n" \
-"    int k = 0;							  \n" \
 "                      						  \n" \
 "    //int rows = n/cols;                                         \n" \
 "    //Make sure we do not go out of bounds                       \n" \
 "    if (id < n)                                                  \n" \
 "    {								  \n" \
-"      int x = cols*(id/cols);					  \n" \
-"      int y = id%cols;						  \n" \
+"      int x = cols*id;  					  \n" \
+"      //int y = id%cols;					  \n" \
+"      int j, k, y;						  \n" \
+"     for(j = 0; j < cols; j++)					  \n" \
+"     {								  \n" \
+"      y=0;							  \n" \
 "      for(k = 0; k < cols/*rows*/; k++)			  \n" \
 "      {							  \n" \
-"          c[id] += a[x+k] * b[k*cols+y]; 			  \n" \
+"          c[x+j] += a[x+k] * b[y+j]; 				  \n" \
+"	   y+=cols;						  \n" \
 "      }							  \n" \
+"     }								  \n" \
 "    }								  \n" \
 "}                                                                \n" \
                                                                  "\n" ;
@@ -32,14 +38,14 @@ const char *kernelSource =                                       "\n" \
 int main( int argc, char* argv[] )
 {
     // Length of vectors
-    unsigned int n = 1048576;
+    unsigned int n = 1024; // Use the number of rows to maximize work per thread.
     unsigned int cols = 1024;
 
     // Host input vectors
-    float *h_a;
-    float *h_b;
+    double *h_a;
+    double *h_b;
     // Host output vector
-    float *h_c;
+    double *h_c;
  
     // Device input buffers
     cl_mem d_a;
@@ -55,17 +61,16 @@ int main( int argc, char* argv[] )
     cl_kernel kernel;                 // kernel
  
     // Size, in bytes, of each vector
-    size_t bytes = n*sizeof(float);
+    size_t bytes = n*cols*sizeof(double);
  
     // Allocate memory for each vector on host
-    h_a = (float*)malloc(bytes);
-    h_b = (float*)malloc(bytes);
-    h_c = (float*)malloc(bytes);
+    h_a = (double*)malloc(bytes);
+    h_b = (double*)malloc(bytes);
+    h_c = (double*)malloc(bytes);
  
     // Initialize vectors on host
     int i, j, base;
-    unsigned int rows = n/cols;
-    for( i = 0; i < rows; i++ )
+    for( i = 0; i < n; i++ )
     {
 	base = cols*i;
 	for(j = 0; j < cols; j++)
@@ -77,12 +82,17 @@ int main( int argc, char* argv[] )
  
     size_t globalSize, localSize;
     cl_int err;
- 
+
+    // CC Split Factor
+    double sf = 1.0;
+
     // Number of work items in each local work group
     localSize = 64;
  
     // Number of total work items - localSize must be devisor
-    globalSize = ceil(n/(float)localSize)*localSize;
+    // Make the split here and check condition in kernel. // factor*n must be less than localsize?
+    globalSize = ceil(sf*n/(float)localSize)*localSize;
+    n = 2*n-globalSize;
  
     // Bind to platform
     err = clGetPlatformIDs(1, &cpPlatform, NULL);
@@ -127,6 +137,8 @@ int main( int argc, char* argv[] )
     // Execute the kernel over the entire range of the data set  
     err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &globalSize, &localSize,
                                                               0, NULL, NULL);
+
+    // Execute CPU job concurrently.
  
     // Wait for the command queue to get serviced before reading back results
     clFinish(queue);

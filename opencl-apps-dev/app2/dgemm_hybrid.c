@@ -2,23 +2,26 @@
 #include <stdlib.h>
 #include <math.h>
 #include <CL/opencl.h>
+#include <omp.h>
  
 // OpenCL kernel. Each work item takes care of one element of c
 const char *kernelSource =                                       "\n" \
-"__kernel void gemm(  __global float *a,                         \n" \
-"                       __global float *b,                       \n" \
-"                       __global float *c,                       \n" \
+"#pragma OPENCL EXTENSION cl_khr_fp64 : enable                    \n" \
+"__kernel void gemm(  __global double *a,                         \n" \
+"                       __global double *b,                       \n" \
+"                       __global double *c,                       \n" \
 "                       const unsigned int n,			  \n" \
 "			const unsigned int cols)                  \n" \
 "{                                                                \n" \
 "    //Get our global thread ID                                   \n" \
 "    int id = get_global_id(0);                                   \n" \
-"    int k = 0;							  \n" \
+"    //int k = 0;						  \n" \
 "                      						  \n" \
 "    //int rows = n/cols;                                         \n" \
 "    //Make sure we do not go out of bounds                       \n" \
 "    if (id < n)                                                  \n" \
 "    {								  \n" \
+"      int k;							  \n" \
 "      int x = cols*(id/cols);					  \n" \
 "      int y = id%cols;						  \n" \
 "      for(k = 0; k < cols/*rows*/; k++)			  \n" \
@@ -36,10 +39,10 @@ int main( int argc, char* argv[] )
     unsigned int cols = 1024;
 
     // Host input vectors
-    float *h_a;
-    float *h_b;
+    double *h_a;
+    double *h_b;
     // Host output vector
-    float *h_c;
+    double *h_c;
  
     // Device input buffers
     cl_mem d_a;
@@ -55,16 +58,17 @@ int main( int argc, char* argv[] )
     cl_kernel kernel;                 // kernel
  
     // Size, in bytes, of each vector
-    size_t bytes = n*sizeof(float);
+    size_t bytes = n*sizeof(double);
  
     // Allocate memory for each vector on host
-    h_a = (float*)malloc(bytes);
-    h_b = (float*)malloc(bytes);
-    h_c = (float*)malloc(bytes);
+    h_a = (double*)malloc(bytes);
+    h_b = (double*)malloc(bytes);
+    h_c = (double*)malloc(bytes);
  
     // Initialize vectors on host
     int i, j, base;
     unsigned int rows = n/cols;
+    #pragma omp parallel for 
     for( i = 0; i < rows; i++ )
     {
 	base = cols*i;
@@ -82,8 +86,11 @@ int main( int argc, char* argv[] )
     localSize = 64;
  
     // Number of total work items - localSize must be devisor
-    globalSize = ceil(n/(float)localSize)*localSize;
- 
+    float sf = 1.0;
+    globalSize = ceil(sf*n/(float)localSize)*localSize;
+    int left = n-globalSize; //if this < 0, then the loop won't get exec'd.
+    int aug = n - left; // is this necessary.
+
     // Bind to platform
     err = clGetPlatformIDs(1, &cpPlatform, NULL);
  
@@ -121,12 +128,32 @@ int main( int argc, char* argv[] )
     err  = clSetKernelArg(kernel, 0, sizeof(cl_mem), &d_a);
     err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &d_b);
     err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &d_c);
-    err |= clSetKernelArg(kernel, 3, sizeof(unsigned int), &n);
+    err |= clSetKernelArg(kernel, 3, sizeof(unsigned int), &aug);		// aug?
     err |= clSetKernelArg(kernel, 4, sizeof(unsigned int), &cols);
  
     // Execute the kernel over the entire range of the data set  
     err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &globalSize, &localSize,
                                                               0, NULL, NULL);
+
+    double* append;
+    if(left > 0)
+    {
+	append = (double*)malloc(left*sizeof(double));
+    }
+
+    int gramsc = (aug/cols)*cols;
+    int adorno = aug%cols;
+    #pragma omp parallel for
+    for(i = aug; i < n; i++)
+    {
+	rows = (i/cols)*cols;
+	base = i%cols;
+
+	for(j = 0; j < cols; j++)
+	{
+	    append[rows-gramsc+base-adorno] += h_a[rows+j]*h_b[j*cols+base];
+	}
+    }
  
     // Wait for the command queue to get serviced before reading back results
     clFinish(queue);
@@ -137,16 +164,24 @@ int main( int argc, char* argv[] )
  
     // Output
     FILE* outfile = fopen("out.gpu.txt", "w");
-	
-    for(i = 0; i < cols; i++)
+
+    for(i = 0; i < aug; i++)
     {
-	base = cols*i;
-	for(j = 0; j < cols; j++)
+	if(i%cols == 0 && i != 0)
 	{
- 	    fprintf(outfile, "%f ", h_c[base+j]);
-        }
-        fprintf(outfile, "\n");
+	    fprintf(outfile, "\n");
+	}
+	fprintf(outfile, "%f ", h_c[i]);
     }
+    for(i = 0; i < left; i++)
+    {
+	if(i%cols == 0)
+	{
+	    fprintf(outfile, "\n");
+	}
+	fprintf(outfile, "%f ", append[i]);
+    }
+    fprintf(outfile, "\n");
 
     fclose(outfile);
     printf("Done.\n");
@@ -161,6 +196,10 @@ int main( int argc, char* argv[] )
     clReleaseContext(context);
  
     //release host memory
+    if(left > 0)
+    {
+	free(append);
+    }
     free(h_a);
     free(h_b);
     free(h_c);
