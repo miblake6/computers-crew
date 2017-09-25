@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <CL/opencl.h>
+#include <omp.h>
  
 // OpenCL kernel. Each work item takes care of one element of c
 const char *kernelSource =                                       "\n" \
@@ -66,6 +67,7 @@ int main( int argc, char* argv[] )
     // Initialize vectors on host
     int i, j, base;
     unsigned int rows = n/cols;
+    #pragma omp parallel for private(i,j)
     for( i = 0; i < rows; i++ )
     {
 	base = cols*i;

@@ -10,7 +10,7 @@ dgemm_cpu.bin: dgemm_cpu.c
 	gcc -g -O3 -Wall -fopenmp -o dgemm_cpu.bin dgemm_cpu.c -lm 
 
 dgemm_gpu.bin: dgemm_gpu.c
-	gcc -g -O3 -Wall -o dgemm_gpu.bin dgemm_gpu.c -lOpenCL -lm
+	gcc -g -O3 -Wall -fopenmp -o dgemm_gpu.bin dgemm_gpu.c -lOpenCL -lm
 
 sgemm_hybrid.bin: sgemm_hybrid.c
 	gcc -g -O3 -Wall -fopenmp -o sgemm_hybrid.bin sgemm_hybrid.c -lm 

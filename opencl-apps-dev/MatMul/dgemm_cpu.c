@@ -16,6 +16,7 @@ int main(int argc, char*argv[])
 
 	int i, j, k;
 	int base;
+	#pragma omp parallel for private(i,j)
 	for(i = 0; i < m; i++)
 	{
 	    base = n*i;
@@ -27,7 +28,7 @@ int main(int argc, char*argv[])
 	}
 
 	// Kernel analogue.
-	#pragma omp parallel for
+	#pragma omp parallel for private(i,j)
 	for(i = 0; i < m; i++)
 	{
 	    base = n*i;
